@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Free browser-based 3D texture painting tool. Paint directly on 3D models, add stickers, and export. No install required.">
+    <meta name="keywords" content="3D, texture, painter, paint, brush, spray, sticker, decal, three.js, WebGL, free, online">
+    <meta property="og:title" content="Texture Painter - Free 3D Texture Painting Tool">
+    <meta property="og:description" content="Paint directly on 3D models in your browser. Free, no install, no account required.">
+    <title>Texture Painter - Free 3D Texture Painting Tool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #viewport {
+            flex: 1;
+            position: relative;
+            cursor: crosshair;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+        #ui-panel {
+            width: 320px;
+            background: #16213e;
+            padding: 15px;
+            overflow-y: auto;
+            border-left: 1px solid #0f3460;
+        }
+        #ui-panel::-webkit-scrollbar { width: 14px; }
+        #ui-panel::-webkit-scrollbar-track { background: #0f3460; border-radius: 7px; }
+        #ui-panel::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #e94560, #0f9b8e);
+            border-radius: 7px;
+            border: 2px solid #0f3460;
+        }
+        #ui-panel::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #ff6b8a, #12c4b3);
+        }
+        #ui-panel { scrollbar-width: auto; scrollbar-color: #e94560 #0f3460; }
+        h1 { font-size: 18px; margin-bottom: 15px; color: #e94560; }
+        h2 {
+            font-size: 14px;
+            margin: 15px 0 10px 0;
+            color: #0f9b8e;
+            border-bottom: 1px solid #0f3460;
+            padding-bottom: 5px;
+        }
+        .section { margin-bottom: 20px; }
+        button {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        button:hover { opacity: 0.9; transform: scale(1.02); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-primary { background: #e94560; color: white; }
+        .btn-secondary { background: #0f3460; color: white; }
+        .btn-success { background: #0f9b8e; color: white; }
+        .btn-warning { background: #f39c12; color: white; }
+        .tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+        .tool-btn { padding: 12px 8px; font-size: 12px; }
+        .tool-btn.active { background: #e94560; box-shadow: 0 0 10px rgba(233, 69, 96, 0.5); }
+        .color-row { display: flex; align-items: center; margin: 10px 0; gap: 10px; }
+        .color-row label { flex: 1; font-size: 12px; }
+        .color-row input[type="color"] { width: 60px; height: 35px; border: none; border-radius: 4px; cursor: pointer; }
+        .slider-row { margin: 10px 0; }
+        .slider-row label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
+        .slider-row input[type="range"] { width: 100%; }
+        #texture-preview { width: 100%; height: 150px; object-fit: contain; border-radius: 4px; background: #333; border: 2px solid #0f3460; }
+        #status { position: fixed; bottom: 20px; left: 20px; background: rgba(0,0,0,0.9); padding: 10px 20px; border-radius: 4px; font-size: 12px; z-index: 100; }
+        .color-palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin: 10px 0; }
+        .palette-color { width: 100%; aspect-ratio: 1; border: 2px solid transparent; border-radius: 4px; cursor: pointer; }
+        .palette-color:hover { border-color: white; }
+        .palette-color.selected { border-color: #e94560; }
+        #sticker-preview { width: 100%; max-height: 80px; object-fit: contain; background: #333; border-radius: 4px; margin: 5px 0; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12px; }
+        .checkbox-row input { width: 16px; height: 16px; }
+        #cursor-preview { position: fixed; pointer-events: none; border: 2px solid white; border-radius: 50%; z-index: 1000; display: none; }
+        #drop-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(233, 69, 96, 0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            font-size: 24px;
+            color: white;
+        }
+        #drop-overlay.active { display: flex; }
+        .help-text { font-size: 11px; color: #888; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div id="drop-overlay">📦 Drop 3D model or texture here</div>
+
+    <div id="viewport">
+        <div id="canvas-container"></div>
+    </div>
+
+    <div id="cursor-preview"></div>
+
+    <div id="ui-panel">
+        <h1>🎨 Texture Painter</h1>
+
+        <div class="section">
+            <button class="btn-primary" onclick="document.getElementById('mesh-input').click()">
+                📦 Load 3D Model
+            </button>
+            <input type="file" id="mesh-input" accept=".obj,.glb,.gltf,.fbx" style="display:none">
+
+            <button class="btn-secondary" onclick="document.getElementById('texture-input').click()">
+                🖼️ Load Texture
+            </button>
+            <input type="file" id="texture-input" accept=".png,.jpg,.jpeg" style="display:none">
+            <p class="help-text">Or drag & drop files anywhere</p>
+        </div>
+
+        <div class="section">
+            <h2>Texture Preview</h2>
+            <canvas id="texture-preview"></canvas>
+        </div>
+
+        <div class="section">
+            <h2>Tools</h2>
+            <div class="tool-grid">
+                <button class="btn-secondary tool-btn active" id="tool-spray" onclick="setTool('spray')">
+                    🎨 Spray Paint
+                </button>
+                <button class="btn-secondary tool-btn" id="tool-brush" onclick="setTool('brush')">
+                    🖌️ Brush
+                </button>
+                <button class="btn-secondary tool-btn" id="tool-sticker" onclick="setTool('sticker')">
+                    🏷️ Sticker
+                </button>
+                <button class="btn-secondary tool-btn" id="tool-eraser" onclick="setTool('eraser')">
+                    🧽 Eraser
+                </button>
+                <button class="btn-secondary tool-btn" id="tool-eyedrop" onclick="setTool('eyedrop')">
+                    💧 Eyedropper
+                </button>
+                <button class="btn-secondary tool-btn" id="tool-move" onclick="setTool('move')">
+                    🔄 Rotate View
+                </button>
+            </div>
+            <p class="help-text">Shortcuts: B=Brush, S=Spray, E=Eraser, R=Rotate, I=Eyedropper</p>
+        </div>
+
+        <div class="section">
+            <h2>Color</h2>
+            <div class="color-row">
+                <label>Paint Color:</label>
+                <input type="color" id="paint-color" value="#ff0000">
+            </div>
+            <div class="color-palette" id="palette"></div>
+        </div>
+
+        <div class="section">
+            <h2>Tool Size</h2>
+            <div class="slider-row">
+                <label>Size: <span id="size-value">30</span>px</label>
+                <input type="range" id="brush-size" min="1" max="200" value="30">
+            </div>
+        </div>
+
+        <div class="section" id="brush-settings">
+            <h2>Brush Settings</h2>
+            <div class="slider-row">
+                <label>Opacity: <span id="opacity-value">100</span>%</label>
+                <input type="range" id="brush-opacity" min="1" max="100" value="100">
+            </div>
+            <div class="slider-row">
+                <label>Hardness: <span id="hardness-value">50</span>%</label>
+                <input type="range" id="brush-hardness" min="0" max="100" value="50">
+            </div>
+        </div>
+
+        <div class="section" id="sticker-section" style="display:none;">
+            <h2>Sticker</h2>
+            <button class="btn-secondary" onclick="document.getElementById('sticker-input').click()">
+                📁 Load Sticker Image
+            </button>
+            <input type="file" id="sticker-input" accept=".png,.jpg,.jpeg,.gif,.webp" style="display:none">
+            <img id="sticker-preview" src="" style="display:none;">
+            <div class="slider-row">
+                <label>Rotation: <span id="sticker-rotation-value">0</span>°</label>
+                <input type="range" id="sticker-rotation" min="0" max="360" value="0">
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Turntable</h2>
+            <div class="checkbox-row">
+                <input type="checkbox" id="auto-rotate">
+                <label for="auto-rotate">Auto-rotate</label>
+            </div>
+            <div class="slider-row">
+                <label>Speed: <span id="rotate-speed-value">1.0</span>x</label>
+                <input type="range" id="rotate-speed" min="0.1" max="3" step="0.1" value="1">
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Actions</h2>
+            <button class="btn-warning" onclick="undoAction()">↩ Undo (Ctrl+Z)</button>
+            <button class="btn-secondary" onclick="clearPaint()">🗑️ Clear All Paint</button>
+            <button class="btn-success" onclick="exportTexture()">💾 Export Texture (PNG)</button>
+            <button class="btn-primary" onclick="exportModel()">📦 Export Model (GLB)</button>
+        </div>
+
+        <div class="section">
+            <p class="help-text" style="text-align: center;">
+                <a href="https://github.com/Aphene/texture-painter" target="_blank" style="color: #0f9b8e;">GitHub</a> •
+                Free & Open Source
+            </p>
+        </div>
+    </div>
+
+    <div id="status">Ready - Load a 3D model or drag & drop to begin</div>
+
+    <script src="js/three.min.js"></script>
+    <script src="js/OrbitControls.js"></script>
+    <script src="js/GLTFLoader.js"></script>
+    <script src="js/GLTFExporter.js"></script>
+    <script src="js/FBXLoader.js"></script>
+    <script src="js/fflate.min.js"></script>
+
+    <script>
+        // ============================================
+        // SCENE SETUP
+        // ============================================
+        let scene, camera, renderer, controls;
+        let currentModel = null;
+        let currentMeshes = [];
+        let textureCanvas, textureCtx;
+        let originalTexture = null;
+        let undoStack = [];
+        const MAX_UNDO = 20;
+
+        let currentTool = 'spray';
+        let isPainting = false;
+        let lastPaintPos = null;
+        let stickerImage = null;
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x2a2a3a);
+
+            camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 1, 3);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.target.set(0, 0, 0);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 5);
+            scene.add(dirLight);
+
+            const backLight = new THREE.DirectionalLight(0xffffff, 0.3);
+            backLight.position.set(-5, 5, -5);
+            scene.add(backLight);
+
+            const grid = new THREE.GridHelper(10, 20, 0x444444, 0x333333);
+            scene.add(grid);
+
+            initTextureCanvas();
+            setupEventListeners();
+            setupColorPalette();
+            setupDragAndDrop();
+            animate();
+        }
+
+        function initTextureCanvas() {
+            textureCanvas = document.createElement('canvas');
+            textureCanvas.width = 2048;
+            textureCanvas.height = 2048;
+            textureCtx = textureCanvas.getContext('2d');
+            textureCtx.fillStyle = '#808080';
+            textureCtx.fillRect(0, 0, 2048, 2048);
+            updateTexturePreview();
+        }
+
+        function updateTexturePreview() {
+            const preview = document.getElementById('texture-preview');
+            const ctx = preview.getContext('2d');
+            preview.width = 280;
+            preview.height = 150;
+            ctx.drawImage(textureCanvas, 0, 0, 280, 150);
+        }
+
+        function setupColorPalette() {
+            const palette = document.getElementById('palette');
+            const colors = [
+                '#ff0000', '#ff7700', '#ffff00', '#00ff00',
+                '#00ffff', '#0000ff', '#ff00ff', '#ffffff',
+                '#ff6666', '#ffaa66', '#ffff66', '#66ff66',
+                '#66ffff', '#6666ff', '#ff66ff', '#cccccc',
+                '#cc0000', '#cc5500', '#cccc00', '#00cc00',
+                '#00cccc', '#0000cc', '#cc00cc', '#888888',
+                '#880000', '#884400', '#888800', '#008800',
+                '#008888', '#000088', '#880088', '#000000'
+            ];
+
+            colors.forEach(color => {
+                const div = document.createElement('div');
+                div.className = 'palette-color';
+                div.style.background = color;
+                div.onclick = () => {
+                    document.getElementById('paint-color').value = color;
+                    document.querySelectorAll('.palette-color').forEach(p => p.classList.remove('selected'));
+                    div.classList.add('selected');
+                };
+                palette.appendChild(div);
+            });
+        }
+
+        function setupDragAndDrop() {
+            const overlay = document.getElementById('drop-overlay');
+
+            document.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                overlay.classList.add('active');
+            });
+
+            document.addEventListener('dragleave', (e) => {
+                if (e.relatedTarget === null) {
+                    overlay.classList.remove('active');
+                }
+            });
+
+            document.addEventListener('drop', (e) => {
+                e.preventDefault();
+                overlay.classList.remove('active');
+
+                const file = e.dataTransfer.files[0];
+                if (!file) return;
+
+                const ext = file.name.split('.').pop().toLowerCase();
+
+                if (['obj', 'glb', 'gltf', 'fbx'].includes(ext)) {
+                    handleDroppedMesh(file);
+                } else if (['png', 'jpg', 'jpeg'].includes(ext)) {
+                    handleDroppedTexture(file);
+                } else {
+                    setStatus('Unsupported file type: ' + ext);
+                }
+            });
+        }
+
+        function handleDroppedMesh(file) {
+            setStatus('Loading model: ' + file.name);
+            const ext = file.name.split('.').pop().toLowerCase();
+            const reader = new FileReader();
+
+            reader.onload = (e) => {
+                if (ext === 'fbx') loadFBX(e.target.result, file.name);
+                else if (ext === 'obj') loadOBJ(e.target.result, file.name);
+                else loadGLB(e.target.result, file.name);
+            };
+
+            if (ext === 'obj') reader.readAsText(file);
+            else reader.readAsArrayBuffer(file);
+        }
+
+        function handleDroppedTexture(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    saveUndoState();
+                    textureCanvas.width = img.width;
+                    textureCanvas.height = img.height;
+                    textureCtx.drawImage(img, 0, 0);
+                    updateAllMeshTextures();
+                    updateTexturePreview();
+                    setStatus('Loaded texture: ' + file.name);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function setupEventListeners() {
+            const container = document.getElementById('canvas-container');
+
+            document.getElementById('mesh-input').addEventListener('change', handleMeshLoad);
+            document.getElementById('texture-input').addEventListener('change', handleTextureLoad);
+            document.getElementById('sticker-input').addEventListener('change', handleStickerLoad);
+
+            container.addEventListener('mousedown', onMouseDown);
+            container.addEventListener('mousemove', onMouseMove);
+            container.addEventListener('mouseup', onMouseUp);
+            container.addEventListener('mouseleave', onMouseUp);
+
+            document.getElementById('brush-size').addEventListener('input', e => {
+                document.getElementById('size-value').textContent = e.target.value;
+                updateCursorPreview();
+            });
+            document.getElementById('brush-opacity').addEventListener('input', e => {
+                document.getElementById('opacity-value').textContent = e.target.value;
+            });
+            document.getElementById('brush-hardness').addEventListener('input', e => {
+                document.getElementById('hardness-value').textContent = e.target.value;
+            });
+            document.getElementById('sticker-rotation').addEventListener('input', e => {
+                document.getElementById('sticker-rotation-value').textContent = e.target.value;
+            });
+            document.getElementById('rotate-speed').addEventListener('input', e => {
+                document.getElementById('rotate-speed-value').textContent = e.target.value;
+            });
+
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+        }
+
+        function onKeyDown(e) {
+            if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undoAction(); }
+            if (e.key === 'b') setTool('brush');
+            if (e.key === 's') setTool('spray');
+            if (e.key === 'e') setTool('eraser');
+            if (e.key === 'r') setTool('move');
+            if (e.key === 'i') setTool('eyedrop');
+        }
+
+        // ============================================
+        // MODEL LOADING
+        // ============================================
+        function handleMeshLoad(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            handleDroppedMesh(file);
+        }
+
+        function loadGLB(arrayBuffer, filename) {
+            const loader = new THREE.GLTFLoader();
+            loader.parse(arrayBuffer, '', (gltf) => {
+                setupModel(gltf.scene, filename);
+            }, (error) => {
+                console.error('Error loading GLB:', error);
+                setStatus('Error loading model: ' + error.message);
+            });
+        }
+
+        function loadFBX(arrayBuffer, filename) {
+            const loader = new THREE.FBXLoader();
+            try {
+                const model = loader.parse(arrayBuffer, '');
+                setupModel(model, filename);
+            } catch (error) {
+                console.error('Error loading FBX:', error);
+                setStatus('Error loading FBX: ' + error.message);
+            }
+        }
+
+        function loadOBJ(text, filename) {
+            const lines = text.split('\n');
+            const vertices = [], uvs = [], normals = [], faces = [];
+
+            lines.forEach(line => {
+                const parts = line.trim().split(/\s+/);
+                if (parts[0] === 'v') {
+                    vertices.push(parseFloat(parts[1]), parseFloat(parts[2]), parseFloat(parts[3]));
+                } else if (parts[0] === 'vt') {
+                    uvs.push(parseFloat(parts[1]), parseFloat(parts[2]));
+                } else if (parts[0] === 'vn') {
+                    normals.push(parseFloat(parts[1]), parseFloat(parts[2]), parseFloat(parts[3]));
+                } else if (parts[0] === 'f') {
+                    for (let i = 1; i < parts.length; i++) {
+                        const indices = parts[i].split('/');
+                        faces.push({
+                            v: parseInt(indices[0]) - 1,
+                            vt: indices[1] ? parseInt(indices[1]) - 1 : -1,
+                            vn: indices[2] ? parseInt(indices[2]) - 1 : -1
+                        });
+                    }
+                }
+            });
+
+            const geometry = new THREE.BufferGeometry();
+            const posArray = [], uvArray = [], normalArray = [];
+
+            for (let i = 0; i < faces.length; i += 3) {
+                for (let j = 0; j < 3; j++) {
+                    const f = faces[i + j];
+                    if (f) {
+                        posArray.push(vertices[f.v * 3], vertices[f.v * 3 + 1], vertices[f.v * 3 + 2]);
+                        if (f.vt >= 0 && uvs.length > 0) uvArray.push(uvs[f.vt * 2], uvs[f.vt * 2 + 1]);
+                        if (f.vn >= 0 && normals.length > 0) normalArray.push(normals[f.vn * 3], normals[f.vn * 3 + 1], normals[f.vn * 3 + 2]);
+                    }
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(posArray, 3));
+            if (uvArray.length > 0) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvArray, 2));
+            if (normalArray.length > 0) geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normalArray, 3));
+            else geometry.computeVertexNormals();
+
+            const material = new THREE.MeshStandardMaterial({ color: 0x888888 });
+            const mesh = new THREE.Mesh(geometry, material);
+            const group = new THREE.Group();
+            group.add(mesh);
+            setupModel(group, filename);
+        }
+
+        function setupModel(model, filename) {
+            if (currentModel) scene.remove(currentModel);
+
+            currentModel = model;
+            currentMeshes = [];
+
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scale = 2 / maxDim;
+
+            model.scale.multiplyScalar(scale);
+            model.position.sub(center.multiplyScalar(scale));
+
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    currentMeshes.push(child);
+                    if (child.material && child.material.map && child.material.map.image) {
+                        originalTexture = child.material.map.image;
+                        textureCanvas.width = originalTexture.width || 2048;
+                        textureCanvas.height = originalTexture.height || 2048;
+                        textureCtx.drawImage(originalTexture, 0, 0);
+                        undoStack = [];
+                    }
+                    applyTextureToMesh(child);
+                }
+            });
+
+            scene.add(model);
+            updateTexturePreview();
+            setStatus('Loaded: ' + filename + ' (' + currentMeshes.length + ' mesh(es))');
+        }
+
+        function handleTextureLoad(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            handleDroppedTexture(file);
+        }
+
+        function handleStickerLoad(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                stickerImage = new Image();
+                stickerImage.onload = () => {
+                    document.getElementById('sticker-preview').src = e.target.result;
+                    document.getElementById('sticker-preview').style.display = 'block';
+                    setStatus('Loaded sticker: ' + file.name);
+                };
+                stickerImage.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function applyTextureToMesh(mesh) {
+            const texture = new THREE.CanvasTexture(textureCanvas);
+            texture.encoding = THREE.sRGBEncoding;
+            texture.flipY = true;
+            texture.needsUpdate = true;
+
+            if (mesh.material) {
+                if (mesh.material.map) mesh.material.map.dispose();
+                mesh.material.map = texture;
+                mesh.material.needsUpdate = true;
+            }
+        }
+
+        function updateAllMeshTextures() {
+            currentMeshes.forEach(mesh => {
+                if (mesh.material && mesh.material.map) mesh.material.map.needsUpdate = true;
+            });
+        }
+
+        // ============================================
+        // PAINTING
+        // ============================================
+        function setTool(tool) {
+            currentTool = tool;
+
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('tool-' + tool).classList.add('active');
+
+            document.getElementById('sticker-section').style.display = tool === 'sticker' ? 'block' : 'none';
+            document.getElementById('brush-settings').style.display =
+                (tool === 'brush' || tool === 'spray' || tool === 'eraser') ? 'block' : 'none';
+
+            if (tool === 'sticker' && !stickerImage) document.getElementById('sticker-input').click();
+
+            controls.enabled = (tool === 'move');
+
+            const viewport = document.getElementById('viewport');
+            if (tool === 'move') viewport.style.cursor = 'grab';
+            else if (tool === 'eyedrop') viewport.style.cursor = 'crosshair';
+            else viewport.style.cursor = 'none';
+
+            updateCursorPreview();
+        }
+
+        function updateCursorPreview() {
+            const cursor = document.getElementById('cursor-preview');
+            if (currentTool === 'move' || currentTool === 'eyedrop') { cursor.style.display = 'none'; return; }
+
+            const size = parseInt(document.getElementById('brush-size').value);
+            cursor.style.width = size + 'px';
+            cursor.style.height = size + 'px';
+            cursor.style.display = 'block';
+            cursor.style.borderRadius = '50%';
+
+            if (currentTool === 'eraser') {
+                cursor.style.borderColor = 'white';
+                cursor.style.background = 'rgba(255,255,255,0.3)';
+            } else if (currentTool === 'sticker') {
+                cursor.style.borderColor = '#00ff00';
+                cursor.style.background = 'rgba(0,255,0,0.2)';
+                if (stickerImage) cursor.style.borderRadius = '4px';
+            } else {
+                cursor.style.borderColor = document.getElementById('paint-color').value;
+                cursor.style.background = 'transparent';
+            }
+        }
+
+        function onMouseDown(e) {
+            if (currentTool === 'move') return;
+            isPainting = true;
+            lastPaintPos = null;
+            if (currentTool !== 'eyedrop') saveUndoState();
+            paint(e);
+        }
+
+        function onMouseMove(e) {
+            const cursor = document.getElementById('cursor-preview');
+            const size = parseInt(document.getElementById('brush-size').value);
+            cursor.style.left = (e.clientX - size/2) + 'px';
+            cursor.style.top = (e.clientY - size/2) + 'px';
+
+            if (!isPainting || currentTool === 'move') return;
+            paint(e);
+        }
+
+        function onMouseUp() { isPainting = false; lastPaintPos = null; }
+
+        function paint(e) {
+            if (currentMeshes.length === 0) return;
+
+            const container = document.getElementById('canvas-container');
+            const rect = container.getBoundingClientRect();
+
+            mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(currentMeshes, true);
+
+            if (intersects.length > 0 && intersects[0].uv) {
+                const uv = intersects[0].uv;
+                const texX = Math.floor(uv.x * textureCanvas.width);
+                const texY = Math.floor((1 - uv.y) * textureCanvas.height);
+
+                if (currentTool === 'eyedrop') eyedrop(texX, texY);
+                else if (currentTool === 'sticker' && stickerImage) placeSticker(texX, texY);
+                else paintAt(texX, texY);
+            }
+        }
+
+        function paintAt(x, y) {
+            const size = parseInt(document.getElementById('brush-size').value);
+            const opacity = parseInt(document.getElementById('brush-opacity').value) / 100;
+            const hardness = parseInt(document.getElementById('brush-hardness').value) / 100;
+            const color = document.getElementById('paint-color').value;
+            const scaledSize = size * (textureCanvas.width / 500);
+
+            const points = [];
+            if (lastPaintPos && (currentTool === 'brush' || currentTool === 'spray' || currentTool === 'eraser')) {
+                const dx = x - lastPaintPos.x, dy = y - lastPaintPos.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const step = scaledSize / 4;
+                for (let i = 0; i < dist; i += step) {
+                    const t = i / dist;
+                    points.push({ x: lastPaintPos.x + dx * t, y: lastPaintPos.y + dy * t });
+                }
+            }
+            points.push({ x, y });
+
+            points.forEach(point => {
+                if (currentTool === 'spray') drawSpray(point.x, point.y, scaledSize, color, opacity);
+                else if (currentTool === 'brush') drawBrush(point.x, point.y, scaledSize, color, opacity, hardness);
+                else if (currentTool === 'eraser') erase(point.x, point.y, scaledSize, hardness);
+            });
+
+            lastPaintPos = { x, y };
+            updateAllMeshTextures();
+            updateTexturePreview();
+        }
+
+        function drawSpray(x, y, size, color, opacity) {
+            const density = Math.floor(size * 2);
+            const r = parseInt(color.substr(1, 2), 16);
+            const g = parseInt(color.substr(3, 2), 16);
+            const b = parseInt(color.substr(5, 2), 16);
+
+            for (let i = 0; i < density; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.random() * size / 2;
+                const px = x + Math.cos(angle) * radius;
+                const py = y + Math.sin(angle) * radius;
+                const dist = radius / (size / 2);
+                const alpha = opacity * (1 - dist * 0.5) * Math.random();
+
+                textureCtx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                textureCtx.beginPath();
+                textureCtx.arc(px, py, 2, 0, Math.PI * 2);
+                textureCtx.fill();
+            }
+        }
+
+        function drawBrush(x, y, size, color, opacity, hardness) {
+            const r = parseInt(color.substr(1, 2), 16);
+            const g = parseInt(color.substr(3, 2), 16);
+            const b = parseInt(color.substr(5, 2), 16);
+
+            if (hardness > 0.9) {
+                textureCtx.fillStyle = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+                textureCtx.beginPath();
+                textureCtx.arc(x, y, size / 2, 0, Math.PI * 2);
+                textureCtx.fill();
+            } else {
+                const gradient = textureCtx.createRadialGradient(x, y, 0, x, y, size / 2);
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${opacity})`);
+                gradient.addColorStop(hardness, `rgba(${r}, ${g}, ${b}, ${opacity})`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                textureCtx.fillStyle = gradient;
+                textureCtx.beginPath();
+                textureCtx.arc(x, y, size / 2, 0, Math.PI * 2);
+                textureCtx.fill();
+            }
+        }
+
+        function erase(x, y, size, hardness) {
+            if (originalTexture) {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = textureCanvas.width;
+                tempCanvas.height = textureCanvas.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(originalTexture, 0, 0, textureCanvas.width, textureCanvas.height);
+
+                textureCtx.save();
+                textureCtx.beginPath();
+                textureCtx.arc(x, y, size / 2, 0, Math.PI * 2);
+                textureCtx.clip();
+                textureCtx.drawImage(tempCanvas, 0, 0);
+                textureCtx.restore();
+            } else {
+                textureCtx.fillStyle = '#808080';
+                textureCtx.beginPath();
+                textureCtx.arc(x, y, size / 2, 0, Math.PI * 2);
+                textureCtx.fill();
+            }
+        }
+
+        function eyedrop(x, y) {
+            const pixel = textureCtx.getImageData(x, y, 1, 1).data;
+            const hex = '#' + pixel[0].toString(16).padStart(2, '0') +
+                              pixel[1].toString(16).padStart(2, '0') +
+                              pixel[2].toString(16).padStart(2, '0');
+            document.getElementById('paint-color').value = hex;
+            setStatus('Picked color: ' + hex);
+        }
+
+        function placeSticker(x, y) {
+            if (!stickerImage) return;
+
+            const size = parseInt(document.getElementById('brush-size').value);
+            const rotation = parseInt(document.getElementById('sticker-rotation').value);
+            const scaledSize = size * (textureCanvas.width / 500);
+            const aspect = stickerImage.width / stickerImage.height;
+            const width = scaledSize, height = scaledSize / aspect;
+
+            textureCtx.save();
+            textureCtx.translate(x, y);
+            textureCtx.rotate(rotation * Math.PI / 180);
+            textureCtx.drawImage(stickerImage, -width/2, -height/2, width, height);
+            textureCtx.restore();
+
+            updateAllMeshTextures();
+            updateTexturePreview();
+            isPainting = false;
+        }
+
+        // ============================================
+        // UNDO / ACTIONS
+        // ============================================
+        function saveUndoState() {
+            const imageData = textureCtx.getImageData(0, 0, textureCanvas.width, textureCanvas.height);
+            undoStack.push(imageData);
+            if (undoStack.length > MAX_UNDO) undoStack.shift();
+        }
+
+        function undoAction() {
+            if (undoStack.length === 0) { setStatus('Nothing to undo'); return; }
+            const imageData = undoStack.pop();
+            textureCtx.putImageData(imageData, 0, 0);
+            updateAllMeshTextures();
+            updateTexturePreview();
+            setStatus('Undo (' + undoStack.length + ' states remaining)');
+        }
+
+        function clearPaint() {
+            if (!confirm('Clear all paint? This cannot be undone.')) return;
+
+            if (originalTexture) {
+                textureCtx.drawImage(originalTexture, 0, 0, textureCanvas.width, textureCanvas.height);
+            } else {
+                textureCtx.fillStyle = '#808080';
+                textureCtx.fillRect(0, 0, textureCanvas.width, textureCanvas.height);
+            }
+
+            undoStack = [];
+            updateAllMeshTextures();
+            updateTexturePreview();
+            setStatus('Paint cleared');
+        }
+
+        function exportTexture() {
+            const link = document.createElement('a');
+            link.download = 'painted_texture.png';
+            link.href = textureCanvas.toDataURL('image/png');
+            link.click();
+            setStatus('Texture exported');
+        }
+
+        function exportModel() {
+            if (!currentModel) { alert('No model loaded'); return; }
+
+            setStatus('Exporting model...');
+            const exporter = new THREE.GLTFExporter();
+            exporter.parse(currentModel, (result) => {
+                const blob = new Blob([result], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = 'painted_model.glb';
+                link.href = url;
+                link.click();
+                URL.revokeObjectURL(url);
+                setStatus('Model exported');
+            }, (error) => {
+                console.error('Export error:', error);
+                setStatus('Export failed: ' + error.message);
+            }, { binary: true });
+        }
+
+        // ============================================
+        // ANIMATION LOOP
+        // ============================================
+        function animate() {
+            requestAnimationFrame(animate);
+            if (document.getElementById('auto-rotate').checked && currentModel) {
+                const speed = parseFloat(document.getElementById('rotate-speed').value);
+                currentModel.rotation.y += 0.01 * speed;
+            }
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+        init();
+    </script>
+</body>
+</html>
