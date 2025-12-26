@@ -214,6 +214,15 @@
         </div>
 
         <div class="section">
+            <h2>Luminosity</h2>
+            <div class="slider-row">
+                <label>Adjust: <span id="luminosity-value">0</span></label>
+                <input type="range" id="luminosity" min="-100" max="100" value="0">
+            </div>
+            <p class="help-text">Drag to adjust, release to apply</p>
+        </div>
+
+        <div class="section">
             <h2>Actions</h2>
             <button class="btn-warning" onclick="undoAction()">↩ Undo (Ctrl+Z)</button>
             <button class="btn-secondary" onclick="clearPaint()">🗑️ Clear All Paint</button>
@@ -254,6 +263,7 @@
         let isPainting = false;
         let lastPaintPos = null;
         let stickerImage = null;
+        let luminosityBase = null;
 
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
@@ -438,6 +448,16 @@
                 document.getElementById('rotate-speed-value').textContent = e.target.value;
             });
 
+            const luminositySlider = document.getElementById('luminosity');
+            luminositySlider.addEventListener('mousedown', onLuminosityStart);
+            luminositySlider.addEventListener('touchstart', onLuminosityStart);
+            luminositySlider.addEventListener('input', e => {
+                document.getElementById('luminosity-value').textContent = e.target.value;
+                onLuminosityInput(parseInt(e.target.value));
+            });
+            luminositySlider.addEventListener('mouseup', onLuminosityEnd);
+            luminositySlider.addEventListener('touchend', onLuminosityEnd);
+
             window.addEventListener('resize', onWindowResize);
             document.addEventListener('keydown', onKeyDown);
         }
@@ -591,7 +611,10 @@
         function applyTextureToMesh(mesh) {
             const texture = new THREE.CanvasTexture(textureCanvas);
             texture.encoding = THREE.sRGBEncoding;
-            texture.flipY = true;
+            // Preserve original flipY (GLB uses false, OBJ uses true)
+            texture.flipY = (mesh.material && mesh.material.map)
+                ? mesh.material.map.flipY
+                : true;
             texture.needsUpdate = true;
 
             if (mesh.material) {
@@ -820,6 +843,45 @@
             updateAllMeshTextures();
             updateTexturePreview();
             isPainting = false;
+        }
+
+        // ============================================
+        // LUMINOSITY
+        // ============================================
+        function onLuminosityStart() {
+            luminosityBase = textureCtx.getImageData(0, 0, textureCanvas.width, textureCanvas.height);
+            saveUndoState();
+        }
+
+        function onLuminosityInput(value) {
+            if (!luminosityBase) {
+                onLuminosityStart();
+            }
+
+            textureCtx.putImageData(luminosityBase, 0, 0);
+
+            if (value !== 0) {
+                const imageData = textureCtx.getImageData(0, 0, textureCanvas.width, textureCanvas.height);
+                const data = imageData.data;
+                const adjustment = value * 2.55;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    data[i] = Math.max(0, Math.min(255, data[i] + adjustment));
+                    data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + adjustment));
+                    data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + adjustment));
+                }
+
+                textureCtx.putImageData(imageData, 0, 0);
+            }
+
+            updateAllMeshTextures();
+            updateTexturePreview();
+        }
+
+        function onLuminosityEnd() {
+            luminosityBase = null;
+            document.getElementById('luminosity').value = 0;
+            document.getElementById('luminosity-value').textContent = '0';
         }
 
         // ============================================
